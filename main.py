@@ -83,12 +83,44 @@ def query_task5(spark: SparkSession):
 
 # amount of active/inactive customers in each city, sort -> descending inactive
 def query_task6(spark: SparkSession):
-    pass
+    df_city = read_table(spark, 'city')
+    df_address = read_table(spark, 'address')
+    df_customer = read_table(spark, 'customer')
+
+    df = df_address.join(df_customer, df_address['address_id'] == df_customer['address_id'], 'inner')
+    active_df = df.where(df['active'] == 1).groupBy(df['city_id']).agg(count(df['customer_id']).alias('active_cnt'))
+    inactive_df = df.where(df['active'] == 0).groupBy(df['city_id']).agg(count(df['customer_id']).alias('inactive_cnt'))
+    df = df_city.join(active_df, df_city['city_id'] == active_df['city_id'], 'left') \
+                .join(inactive_df, df_city['city_id'] == inactive_df['city_id'], 'left')
+    df = df.fillna(value=0, subset=['active_cnt', 'inactive_cnt'])
+
+    return df.select(df['city'], df['active_cnt'], df['inactive_cnt']).sort(desc(df['inactive_cnt']))
 
 
 # show film category with the largest total rental in cities that start with an 'a' or contain '-'
 def query_task7(spark: SparkSession):
-    pass
+    df_cat = read_table(spark, 'category')
+    df_film_cat = read_table(spark, 'film_category')
+    df_film = read_table(spark, 'film')
+    df_city = read_table(spark, 'city')
+    df_address = read_table(spark, 'address')
+    df_inventory = read_table(spark, 'inventory')
+    df_customer = read_table(spark, 'customer')
+    df_rental = read_table(spark, 'rental')
+
+    df = df_address.join(df_customer, df_customer['address_id'] == df_address['address_id'], 'inner') \
+                   .join(df_rental, df_customer['customer_id'] == df_rental['customer_id'], 'inner') \
+                   .join(df_inventory, df_rental['inventory_id'] == df_inventory['inventory_id'], 'inner') \
+                   .join(df_film, df_inventory['film_id'] == df_film['film_id'], 'inner') \
+                   .join(df_film_cat, df_inventory['film_id'] == df_film_cat['film_id'])
+
+    df = df.groupBy(df['city_id'], df['category_id']).agg(sum(df['rental_duration']).alias('total_rental'))
+    df = df.join(df_city, df['city_id'] == df_city['city_id'], 'inner') \
+           .where((lower(df_city['city']).like('a%')) | (df_city['city'].like('%-%'))) \
+           .withColumn('num', row_number().over(Window.partitionBy(df['city_id']).orderBy(desc('total_rental'))))
+    df = df.join(df_cat, df['category_id'] == df_cat['category_id'], 'inner').where(df['num'] == 1)
+
+    return df.select(df['city'], df['name'].alias('category_name'))
 
 
 def main():
@@ -99,11 +131,13 @@ def main():
         .config("spark.executor.extraClassPath", "./postgresql-42.5.0.jar") \
         .getOrCreate()
 
-    #query_task1(spark).show(truncate=False)
-    #query_task2(spark).show(truncate=False)
-    #query_task3(spark).show(truncate=False)
-    #query_task4(spark).show(truncate=False)
+    query_task1(spark).show(truncate=False)
+    query_task2(spark).show(truncate=False)
+    query_task3(spark).show(truncate=False)
+    query_task4(spark).show(truncate=False)
     query_task5(spark).show(truncate=False)
+    query_task6(spark).show(truncate=False)
+    query_task7(spark).show(truncate=False)
 
 
 if __name__ == '__main__':
